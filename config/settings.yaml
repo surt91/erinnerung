@@ -1,0 +1,21 @@
+# Globale Einstellungen. Alles hier ist optional — die Werte sind die Defaults.
+
+timezone: Europe/Berlin
+
+# Nachts wird nicht genervt. Was in diesem Fenster fällig wird, bleibt offen
+# und meldet sich danach. Einzelne Erinnerungen können das per
+# `respect_quiet_hours: false` überstimmen.
+quiet_hours:
+  from: "22:00"
+  to: "08:00"
+
+# Abstand zwischen zwei Erinnerungen an dieselbe Sache, solange sie offen ist.
+nag:
+  interval: 60m
+
+# Nach einer Downtime wird nachgeholt, was innerhalb dieses Fensters
+# fällig gewesen wäre. Älteres verfällt stillschweigend.
+catchup_window: 24h
+
+# Angebotene Schlummer-Knöpfe unter jeder Erinnerung.
+snooze_options: [1h, 3h, tomorrow]

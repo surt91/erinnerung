@@ -1,0 +1,62 @@
+# Beispiele für alle Schedule-Varianten. Lösch das hier, wenn du deine
+# eigenen Dateien angelegt hast — es dürfen beliebig viele *.yaml im Ordner liegen.
+
+reminders:
+  # Jeden Freitag um 18:00, alle 30 Minuten nachhaken.
+  - id: muell-bio
+    title: "Biotonne rausstellen"
+    schedule:
+      every: friday
+      at: "18:00"
+    nag:
+      interval: 30m
+
+  # Mehrere Wochentage auf einmal. 07:30 liegt in der Nachtruhe aus
+  # settings.yaml — ohne die nächste Zeile käme die Erinnerung erst um 08:00.
+  - id: tabletten
+    title: "Tabletten nehmen"
+    respect_quiet_hours: false
+    schedule:
+      every: [mon, wed, fri]
+      at: "07:30"
+    # Wird zweimal hintereinander fällig, ohne dass du bestätigt hast?
+    # `replace` lässt nur die neueste offen (Default), `stack` sammelt alle.
+    on_overlap: replace
+
+  # Täglich.
+  - id: pflanzen
+    title: "Pflanzen gießen"
+    text: "Auch die auf dem Balkon."
+    schedule:
+      every: day
+      at: "19:00"
+
+  # Monatlich am 1.
+  - id: rechnungen
+    title: "Kontoauszüge durchsehen"
+    schedule:
+      every: month
+      day: 1
+      at: "09:00"
+
+  # Jährlich am 12. Oktober, aber die Erinnerung kommt 3 Tage vorher.
+  - id: geburtstag-mama
+    title: "Geschenk für Mama besorgen"
+    schedule:
+      every: year
+      date: "10-12"
+      at: "09:00"
+    lead: 3d
+
+  # Alles Exotische geht per Cron (Minute Stunde Tag Monat Wochentag).
+  - id: backup-pruefen
+    title: "Backup prüfen"
+    schedule:
+      cron: "0 20 * * SUN"
+
+  # Einmalig. Nach dem Erledigen wandert dieser Eintrag automatisch
+  # nach config/archive/2026.yaml.
+  - id: reifenwechsel
+    title: "Termin für Reifenwechsel buchen"
+    schedule:
+      once: 2026-10-01 09:00

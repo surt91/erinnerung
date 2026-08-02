@@ -1,0 +1,25 @@
+services:
+  erinnerung:
+    build: .
+    image: erinnerung:latest
+    container_name: erinnerung
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Zeitzone für Zeitpläne, Ruhezeiten und Anzeige.
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      # Deine Erinnerungen — der Bot liest sie und archiviert erledigte Einmal-Termine.
+      - ./config:/config
+      # Zustand (welche Erinnerung ist offen, wann zuletzt genervt).
+      - state:/data
+    healthcheck:
+      # Der Tick-Loop schreibt regelmäßig einen Heartbeat in die DB.
+      test: ["CMD", "python", "-m", "erinnerung.healthcheck"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  state:
