@@ -11,18 +11,11 @@ from datetime import datetime
 from pathlib import Path
 
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+from . import yamlio
 from .config import ARCHIVE_DIR
 
 log = logging.getLogger(__name__)
-
-
-def _yaml() -> YAML:
-    parser = YAML()
-    parser.preserve_quotes = True
-    parser.indent(mapping=2, sequence=4, offset=2)
-    return parser
 
 
 class YamlArchiver:
@@ -37,7 +30,7 @@ class YamlArchiver:
         if source is None or not source.is_file():
             return False
 
-        parser = _yaml()
+        parser = yamlio.parser()
         data = parser.load(source)
         entries = (data or {}).get("reminders")
         if not entries:
@@ -62,22 +55,9 @@ class YamlArchiver:
         return True
 
     def _write_archive(self, archive_dir: Path, entry, moment: datetime, parser: YAML) -> None:
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        path = archive_dir / f"{moment.year}.yaml"
-
-        data = parser.load(path) if path.is_file() else None
-        if not isinstance(data, CommentedMap):
-            data = CommentedMap()
-        if not isinstance(data.get("reminders"), CommentedSeq):
-            data["reminders"] = CommentedSeq()
-
-        entries = data["reminders"]
-        entries.append(entry)
-        try:
-            entries.yaml_set_comment_before_after_key(
-                len(entries) - 1, before=f"erledigt am {moment.strftime('%d.%m.%Y um %H:%M')}"
-            )
-        except AttributeError:
-            pass  # ohne Kommentar ist auch in Ordnung
-
-        parser.dump(data, path)
+        yamlio.append_reminder(
+            archive_dir / f"{moment.year}.yaml",
+            entry,
+            comment=f"erledigt am {moment.strftime('%d.%m.%Y um %H:%M')}",
+            yaml=parser,
+        )

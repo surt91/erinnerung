@@ -17,7 +17,9 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 UTC = timezone.utc
 
 # Cron kennt nur englische Kürzel; hier darf man großzügiger schreiben.
-_WEEKDAYS = {
+# Öffentlich, weil /neu (siehe :mod:`erinnerung.compose`) dieselben Wörter
+# verstehen soll wie die YAML.
+WEEKDAYS = {
     "mon": "MON", "monday": "MON", "mo": "MON", "montag": "MON",
     "tue": "TUE", "tuesday": "TUE", "di": "TUE", "dienstag": "TUE",
     "wed": "WED", "wednesday": "WED", "mi": "WED", "mittwoch": "WED",
@@ -26,9 +28,9 @@ _WEEKDAYS = {
     "sat": "SAT", "saturday": "SAT", "sa": "SAT", "samstag": "SAT",
     "sun": "SUN", "sunday": "SUN", "so": "SUN", "sonntag": "SUN",
 }
-_DAILY = {"day", "daily", "tag", "täglich", "taeglich"}
-_MONTHLY = {"month", "monthly", "monat", "monatlich"}
-_YEARLY = {"year", "yearly", "annually", "jahr", "jährlich", "jaehrlich"}
+DAILY = {"day", "daily", "tag", "täglich", "taeglich"}
+MONTHLY = {"month", "monthly", "monat", "monatlich"}
+YEARLY = {"year", "yearly", "annually", "jahr", "jährlich", "jaehrlich"}
 
 _TIME = re.compile(r"^(\d{1,2}):(\d{2})$")
 _MONTH_DAY = re.compile(r"^(\d{1,2})[-.](\d{1,2})\.?$")
@@ -126,18 +128,18 @@ class Schedule(BaseModel):
         if isinstance(every, str):
             key = every.strip().lower()
 
-            if key in _DAILY:
+            if key in DAILY:
                 self._reject("day", "date", context="every: day")
                 return f"{minute} {hour} * * *"
 
-            if key in _MONTHLY:
+            if key in MONTHLY:
                 self._reject("date", context="every: month")
                 day = self.day if self.day is not None else 1
                 if not 1 <= day <= 31:
                     raise ScheduleError(f"'day: {day}' liegt außerhalb von 1–31")
                 return f"{minute} {hour} {day} * *"
 
-            if key in _YEARLY:
+            if key in YEARLY:
                 self._reject("day", context="every: year")
                 if not self.date:
                     raise ScheduleError("'every: year' braucht zusätzlich 'date', z.B. date: \"10-12\"")
@@ -148,7 +150,7 @@ class Schedule(BaseModel):
         self._reject("day", "date", context="Wochentage")
         days = []
         for name in names:
-            code = _WEEKDAYS.get(str(name).strip().lower())
+            code = WEEKDAYS.get(str(name).strip().lower())
             if code is None:
                 raise ScheduleError(
                     f"'{name}' ist weder ein Wochentag noch 'day', 'month' oder 'year'"

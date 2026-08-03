@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from erinnerung.bot import BotHandlers, TelegramNotifier
-from erinnerung.config import Reminder
+from erinnerung.config import INBOX_FILE, Reminder, load_config
 from erinnerung.engine import Engine
 from erinnerung.schedule import Schedule
 from erinnerung.store import Store
@@ -132,6 +132,112 @@ async def test_sonderzeichen_im_titel_brechen_nichts(wired):
     assert "&lt;b&gt;fällig&lt;/b&gt; &amp; Co" in text
 
 
+class FakeMessage:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.replies: list[str] = []
+
+    async def reply_text(self, text, parse_mode=None) -> None:
+        self.replies.append(text)
+
+
+def command(text: str):
+    """Ein Update, wie es der CommandHandler durchreicht."""
+    message = FakeMessage(text)
+    return SimpleNamespace(
+        effective_chat=SimpleNamespace(id=CHAT_ID), effective_message=message
+    ), message
+
+
+@pytest.fixture
+def neu(tmp_path):
+    """Handler samt echtem Konfigordner — /neu schreibt schließlich Dateien."""
+    (tmp_path / "settings.yaml").write_text("timezone: Europe/Berlin\n", encoding="utf-8")
+
+    class FakeService:
+        config_dir = tmp_path
+
+        def __init__(self) -> None:
+            self.config = load_config(tmp_path)
+            self.own_writes = 0
+
+        def expect_own_write(self) -> None:
+            self.own_writes += 1
+
+        def reload(self) -> str:
+            self.config = load_config(self.config_dir)
+            self.engine.config = self.config
+            return "♻️ neu geladen"
+
+    service = FakeService()
+    store = Store(tmp_path / "state.db")
+    service.engine = Engine(store, service.config, None, clock=FakeClock(local(2026, 8, 3, 12)))
+    service.notifier = None
+
+    yield SimpleNamespace(
+        handlers=BotHandlers(service, CHAT_ID), service=service, config_dir=tmp_path
+    )
+    store.close()
+
+
+async def test_neu_legt_die_erinnerung_an(neu):
+    update, message = command("/neu freitag 18:00 Biotonne rausstellen\nDeckel zu.")
+    await neu.handlers.new(update, None)
+
+    reminder = neu.service.config.reminders["biotonne-rausstellen"]
+    assert reminder.title == "Biotonne rausstellen"
+    assert reminder.text == "Deckel zu."
+    assert reminder.schedule.cron_expr == "0 18 * * FRI"
+    assert (neu.config_dir / INBOX_FILE).is_file()
+
+    antwort = message.replies[-1]
+    assert "Biotonne rausstellen" in antwort
+    assert "jeden Freitag um 18:00" in antwort
+    assert "Fr, 07.08.2026 um 18:00" in antwort, "die erste Fälligkeit steht in der Antwort"
+
+
+async def test_neu_nennt_bei_einmaligem_den_abstand(neu):
+    update, message = command("/neu in 2h Wäsche aufhängen")
+    await neu.handlers.new(update, None)
+
+    assert "einmalig am Mo, 03.08.2026 um 14:00 (in 2 h)" in message.replies[-1]
+
+
+async def test_neu_meldet_den_eigenen_schreibvorgang_an(neu):
+    update, _ = command("/neu täglich 19:00 Pflanzen gießen")
+    await neu.handlers.new(update, None)
+    assert neu.service.own_writes == 1, "der Dateiwatch soll deswegen nicht meckern"
+
+
+async def test_neu_ohne_verstaendliche_zeitangabe_erklaert_sich(neu):
+    update, message = command("/neu Irgendwann mal aufräumen")
+    await neu.handlers.new(update, None)
+
+    assert "⚠️" in message.replies[-1]
+    assert "/neu freitag 18:00" in message.replies[-1], "die Hilfe kommt gleich mit"
+    assert not (neu.config_dir / INBOX_FILE).exists()
+    assert not neu.service.config.reminders
+
+
+async def test_neu_ohne_argumente_zeigt_die_hilfe(neu):
+    update, message = command("/neu")
+    await neu.handlers.new(update, None)
+
+    assert message.replies[-1].startswith("<b>/neu</b>")
+    assert not (neu.config_dir / INBOX_FILE).exists()
+
+
+async def test_neu_aus_fremdem_chat_wird_ignoriert(neu):
+    message = FakeMessage("/neu täglich 19:00 Pflanzen gießen")
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=99), effective_message=message
+    )
+    await neu.handlers.new(update, None)
+
+    assert message.replies == []
+    assert not (neu.config_dir / INBOX_FILE).exists()
+
+
 async def test_handler_lassen_sich_registrieren():
     """Fängt Vertipper in der Verdrahtung, ohne echtes Telegram."""
     from telegram.ext import ApplicationBuilder
@@ -145,4 +251,4 @@ async def test_handler_lassen_sich_registrieren():
         for handler in handlers
         for command in getattr(handler, "commands", None) or []
     }
-    assert {"offen", "erledigt", "snooze", "plan", "status", "reload"} <= commands
+    assert {"neu", "offen", "erledigt", "snooze", "plan", "status", "reload"} <= commands

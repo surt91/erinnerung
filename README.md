@@ -35,7 +35,41 @@ Erinnerung kommt per Telegram — und sie hakt so lange nach, bis du bestätigst
 Nur die konfigurierte Chat-ID darf mit dem Bot reden — alles andere wird ignoriert.
 Der Bot hängt per Long-Polling an Telegram: kein offener Port, kein Reverse Proxy.
 
-## Erinnerungen konfigurieren
+## Erinnerungen anlegen
+
+### Aus dem Chat — `/neu`
+
+Erst wann, dann was. Das ist der bequeme Weg vom Handy aus:
+
+```
+/neu freitag 18:00 Biotonne rausstellen
+/neu mo, mi, fr 7:30 Tabletten nehmen
+/neu täglich 19:00 Pflanzen gießen
+/neu monatlich am 1. Kontoauszüge durchsehen
+/neu 12. Oktober 9:00 Geschenk für Mama besorgen
+/neu 1.10. 9:00 Reifenwechsel buchen
+/neu in 2h Wäsche aufhängen
+/neu 20:00 Müll rausbringen
+```
+
+Gelesen wird von links, solange die Wörter als Zeitangabe durchgehen — das erste,
+das nicht mehr passt, beginnt den Titel. Verstanden werden Wochentage (deutsch wie
+englisch), `täglich`/`monatlich`/`jährlich`, Datumsangaben (`1.10.`, `12. Oktober`,
+`2026-12-24`), `heute`/`morgen`/`übermorgen`, `in 2h` und als Notausgang
+`cron 0 20 * * SUN`. Ohne Uhrzeit gilt 09:00; eine Uhrzeit ohne Datum meint heute,
+und wenn die schon vorbei ist, morgen. Eine zweite Zeile der Nachricht wird zur
+Beschreibung. Fängt der Titel selbst mit einer Zeitangabe an, trennt ein `|`:
+
+```
+/neu freitag 18:00 | Montagsmeeting vorbereiten
+```
+
+Der Bot antwortet mit dem übersetzten Zeitplan und der ersten Fälligkeit — wenn da
+etwas anderes steht als gemeint, war die Zeitangabe missverständlich. Angelegt wird
+in `config/inbox.yaml`, einer ganz normalen Konfigurationsdatei: aufräumen,
+umsortieren oder in eigene Dateien verschieben ist jederzeit erlaubt.
+
+### In der YAML
 
 Im Ordner `config/` dürfen beliebig viele `*.yaml` liegen, jede mit beliebig vielen
 Erinnerungen. Änderungen greifen innerhalb von Sekunden — der Bot beobachtet den Ordner.
@@ -91,6 +125,7 @@ Dauern schreibst du als `45s`, `30m`, `2h`, `1h30m`, `3d`, `1w`.
 
 | Kommando | Wofür |
 |---|---|
+| `/neu freitag 18:00 Biotonne rausstellen` | Neue Erinnerung anlegen (siehe oben) |
 | `/offen` | Was gerade auf dich wartet |
 | `/erledigt muell-bio` | Bestätigen ohne Knopfdruck (Teileingabe reicht) |
 | `/snooze muell-bio 2h` | Später nochmal |
@@ -139,5 +174,10 @@ rechnet Zeitpläne in Fälligkeiten um, `store.py` hält den Zustand, `engine.py
 Taktgeber (alle 30 s, idempotent), `bot.py` macht Telegram, `app.py` steckt alles
 zusammen. Die Engine kennt Telegram nicht — deshalb lässt sie sich gegen eine
 gefälschte Uhr testen.
+
+Zurückgeschrieben wird die YAML an zwei Stellen: `compose.py` übersetzt die
+`/neu`-Zeile in einen Eintrag, `archive.py` räumt erledigte Einmal-Termine weg. Beide
+gehen durch `yamlio.py` und damit durch den Round-Trip-Modus von ruamel.yaml, damit
+deine Kommentare und Anführungszeichen überleben.
 
 Mehr zu den Entwurfsentscheidungen steht in [PLAN.md](PLAN.md).

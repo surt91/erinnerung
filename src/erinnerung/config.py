@@ -23,6 +23,8 @@ Duration = Annotated[timedelta, BeforeValidator(parse_duration)]
 
 SETTINGS_FILE = "settings.yaml"
 ARCHIVE_DIR = "archive"
+# Hier landet, was per /neu aus dem Chat kommt — eine ganz normale Datei.
+INBOX_FILE = "inbox.yaml"
 DEFAULT_TIMEZONE = "Europe/Berlin"
 
 # Schlummern bis zum nächsten Morgen — keine Dauer, sondern ein Zeitpunkt.

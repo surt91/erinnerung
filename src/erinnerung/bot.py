@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from datetime import datetime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -15,8 +16,9 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
+from . import compose
 from . import format as fmt
-from .config import Reminder
+from .config import INBOX_FILE, Reminder
 from .duration import format_duration
 from .engine import HEARTBEAT, Engine, snooze_label
 from .schedule import next_occurrence
@@ -27,6 +29,20 @@ log = logging.getLogger(__name__)
 DONE = "done"
 SKIP = "skip"
 SNOOZE = "snooze"
+
+_COMMAND = re.compile(r"^/\w+(?:@\S+)?\s*")
+
+NEW_HELP = (
+    "<b>/neu</b> — erst wann, dann was:\n"
+    "<code>/neu freitag 18:00 Biotonne rausstellen</code>\n"
+    "<code>/neu mo, mi, fr 7:30 Tabletten nehmen</code>\n"
+    "<code>/neu täglich 19:00 Pflanzen gießen</code>\n"
+    "<code>/neu monatlich am 1. Kontoauszüge durchsehen</code>\n"
+    "<code>/neu 12. Oktober 9:00 Geschenk besorgen</code>\n"
+    "<code>/neu in 2h Wäsche aufhängen</code>\n"
+    "Eine zweite Zeile wird zur Beschreibung. Fängt der Titel selbst mit einer "
+    "Zeitangabe an, trenn mit <code>|</code>."
+)
 
 
 def _escape(text: str) -> str:
@@ -149,6 +165,7 @@ class BotHandlers:
 
     def register(self, application: Application) -> None:
         application.add_handler(CommandHandler(["start", "hilfe", "help"], self.help))
+        application.add_handler(CommandHandler(["neu", "new"], self.new))
         application.add_handler(CommandHandler(["offen", "open"], self.open_items))
         application.add_handler(CommandHandler(["erledigt", "done"], self.done))
         application.add_handler(CommandHandler(["snooze", "schlummern"], self.snooze))
@@ -174,6 +191,8 @@ class BotHandlers:
         await update.effective_message.reply_text(
             "<b>Erinnerung</b>\n"
             "Ich melde mich, sobald etwas fällig ist, und hake nach, bis du bestätigst.\n\n"
+            "/neu &lt;wann&gt; &lt;was&gt; — neue Erinnerung anlegen, z.B. "
+            "<code>/neu freitag 18:00 Biotonne rausstellen</code>\n"
             "/offen — was gerade offen ist\n"
             "/erledigt &lt;id&gt; — ohne Knopfdruck bestätigen\n"
             "/snooze &lt;id&gt; &lt;dauer&gt; — z.B. <code>/snooze muell-bio 2h</code>\n"
@@ -182,6 +201,64 @@ class BotHandlers:
             "/reload — Konfiguration neu einlesen",
             parse_mode=ParseMode.HTML,
         )
+
+    async def new(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Eine Erinnerung aus dem Chat anlegen — sie landet in der YAML, nicht in der DB."""
+        if not self._allowed(update):
+            return
+        message = update.effective_message
+        request = _COMMAND.sub("", message.text or "", count=1)
+        if not request.strip():
+            await message.reply_text(NEW_HELP, parse_mode=ParseMode.HTML)
+            return
+
+        engine = self.engine
+        now = engine.local(engine.clock())
+        try:
+            draft = compose.parse(request, now=now, taken=engine.config.reminders)
+        except compose.ComposeError as exc:
+            await message.reply_text(
+                f"⚠️ {_escape(str(exc))}\n\n{NEW_HELP}", parse_mode=ParseMode.HTML
+            )
+            return
+
+        service = self._engine_holder
+        service.expect_own_write()
+        try:
+            compose.write(draft, service.config_dir, now=now)
+        except OSError as exc:
+            await message.reply_text(f"⚠️ Schreiben nach {INBOX_FILE} ging schief: {exc}")
+            return
+
+        notice = service.reload()
+        if draft.reminder.id not in self.engine.config.reminders:
+            await message.reply_text(notice, parse_mode=ParseMode.HTML)
+            return
+
+        await message.reply_text(self._confirm(draft), parse_mode=ParseMode.HTML)
+
+    def _confirm(self, draft: compose.Draft) -> str:
+        reminder = draft.reminder
+        lines = [f"➕ <b>{_escape(reminder.title)}</b>"]
+        if reminder.text:
+            lines.append(_escape(reminder.text))
+
+        detail = [draft.description]
+        now = self.engine.clock()
+        moment = next_occurrence(reminder.schedule, self.engine.config.tzinfo, now)
+        if moment is not None:
+            moment -= reminder.lead_delta
+            if reminder.schedule.is_once:
+                # Der Termin steht schon in der Beschreibung — hier fehlt nur, wie weit weg er ist.
+                detail[0] += f" ({fmt.relative(moment - now)})"
+            else:
+                detail.append(
+                    f"zum ersten Mal {fmt.stamp(self.engine.local(moment))} "
+                    f"({fmt.relative(moment - now)})"
+                )
+        lines.append("<i>" + _escape(" · ".join(detail)) + "</i>")
+        lines.append(f"<code>{_escape(reminder.id)}</code> in {INBOX_FILE}")
+        return "\n".join(lines)
 
     async def open_items(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._allowed(update):

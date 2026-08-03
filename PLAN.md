@@ -138,6 +138,8 @@ Kommandos `/offen`, `/erledigt <id>`, `/snooze <id> <dauer>`, `/status`, `/reloa
 Dateiwatch (`watchfiles`) mit Fehlerreport per Telegram statt Absturz.
 Archivierung via `ruamel.yaml` im Round-Trip-Modus, damit Kommentare und Formatierung
 deiner Dateien erhalten bleiben.
+`/neu <wann> <was>` schreibt eine neue Erinnerung nach `config/inbox.yaml` — damit geht
+das Anlegen vom Handy, ohne dass die YAML ihren Rang als einzige Wahrheit verliert.
 
 **Phase 6 — Abschluss**
 `README.md` (BotFather-Setup, Config-Referenz, Betrieb), strukturiertes Logging,
@@ -148,8 +150,8 @@ Healthcheck in Compose, `restart: unless-stopped`.
 - Zeitzone `Europe/Berlin`, überschreibbar via `TZ` bzw. `settings.yaml`.
 - Ein einziger Ziel-Chat (deiner). Mehrere Empfänger wären ein späteres `to:`-Feld.
 - Zeiten in der DB immer UTC, Anzeige lokal — vermeidet DST-Überraschungen.
-- Der Bot editiert YAML nur beim Archivieren; der Watcher ignoriert `config/archive/`
-  und selbst ausgelöste Schreibvorgänge.
+- Der Bot editiert YAML nur beim Archivieren und bei `/neu`; der Watcher ignoriert
+  `config/archive/` und selbst ausgelöste Schreibvorgänge.
 
 ## Später (aus idea.md)
 
