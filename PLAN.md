@@ -15,6 +15,7 @@ zustellend über Telegram, nervend bis zur Bestätigung, startbar per `docker co
 | Vorlaufzeit | Optionales `lead:`-Feld |
 | Config-Reload | Automatischer Dateiwatch, bei Fehler bleibt alte Config aktiv |
 | Einmal-Termine | Nach Erledigung automatisch nach `config/archive/` verschoben |
+| Telegram-Fehler | Wackler werden zweimal wiederholt, Ablehnungen protokolliert; ein globaler Error-Handler meldet unerwartete Fehler in den Chat |
 
 ## Architektur
 

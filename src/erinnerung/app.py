@@ -9,7 +9,8 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram.ext import Application, ApplicationBuilder
+from telegram.error import Conflict, Forbidden, InvalidToken, NetworkError, RetryAfter
+from telegram.ext import Application, ApplicationBuilder, ContextTypes
 from watchfiles import awatch
 
 from .archive import YamlArchiver
@@ -49,9 +50,11 @@ class Service:
             self.store, self.config, self.notifier, archiver=YamlArchiver(self)
         )
         BotHandlers(self, chat_id).register(self.application)
+        self.application.add_error_handler(self._on_error)
 
         self._tasks: list[asyncio.Task] = []
         self._last_config_error: str | None = None
+        self._last_error_notice: str | None = None
         self._skip_reload_notice = False
 
     def run(self) -> None:
@@ -84,6 +87,30 @@ class Service:
         self.engine.config = config
         self._last_config_error = None
         return f"♻️ Konfiguration neu geladen — {len(config.reminders)} Erinnerungen."
+
+    # -- Fehler ------------------------------------------------------------
+
+    async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Auffangnetz für alles, was in einem Handler oder beim Polling schiefgeht.
+
+        Ohne diesen Handler verschluckt python-telegram-bot Ausnahmen mit einem
+        dürren Logeintrag — man merkt es also erst, wenn der Bot nicht antwortet.
+        """
+        error = context.error
+        log.error("Telegram-Update %s fehlgeschlagen", update, exc_info=error)
+
+        if isinstance(error, (NetworkError, RetryAfter, Conflict, Forbidden, InvalidToken)):
+            return  # Telegram-seitig: das Polling fängt sich selbst, der Chat hilft hier nicht
+
+        notice = (
+            "⚠️ <b>Da ist etwas schiefgegangen</b>\n"
+            f"<pre>{html.escape(f'{type(error).__name__}: {error}', quote=False)}</pre>\n"
+            "Der Bot läuft weiter, Details stehen im Log."
+        )
+        if notice == self._last_error_notice:
+            return  # denselben Fehler nicht bei jedem Versuch erneut in den Chat schreiben
+        self._last_error_notice = notice
+        await self.notifier.notify(notice)
 
     # -- Lebenszyklus ------------------------------------------------------
 

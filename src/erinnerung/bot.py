@@ -6,14 +6,24 @@ offen sein und kein Reverse Proxy davor.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
-from datetime import datetime
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
+from typing import TypeVar
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, TelegramError
+from telegram.error import (
+    BadRequest,
+    Forbidden,
+    NetworkError,
+    RetryAfter,
+    TelegramError,
+    TimedOut,
+)
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from . import compose
@@ -49,6 +59,70 @@ def _escape(text: str) -> str:
     return html.escape(text, quote=False)
 
 
+T = TypeVar("T")
+
+RETRY_DELAYS = (2.0, 5.0)  # zwei Nachfassversuche, dann war es kein Wackler mehr
+MAX_WAIT = 60.0  # länger auf ein Rate-Limit zu warten bringt nichts
+
+
+async def call(
+    action: Callable[[], Awaitable[T]],
+    what: str,
+    *,
+    ignore: tuple[type[BaseException], ...] = (),
+) -> T | None:
+    """Einen Telegram-Aufruf machen: Wackler wiederholen, alles andere protokollieren.
+
+    Ergebnis ist ``None``, wenn es endgültig nicht geklappt hat. Kein API-Aufruf soll
+    den Bot anhalten — die nächste Runde bzw. das nächste Kommando versucht es erneut.
+    """
+    for attempt, delay in enumerate((*RETRY_DELAYS, None), start=1):
+        try:
+            return await action()
+        except ignore:
+            return None
+        except RetryAfter as exc:
+            wait = min(_seconds(exc.retry_after) + 1.0, MAX_WAIT)
+            reason = f"Telegram bremst uns ({exc})"
+        except BadRequest as exc:
+            # Unterklasse von NetworkError, heilt aber kein zweiter Versuch.
+            log.warning("%s: Telegram lehnt ab — %s", what, exc)
+            return None
+        except (TimedOut, NetworkError) as exc:
+            wait = delay or 0.0
+            reason = f"Netz wackelt ({exc})"
+        except Forbidden as exc:
+            log.error("%s: Der Bot darf nicht in diesen Chat — %s", what, exc)
+            return None
+        except TelegramError:
+            log.exception("%s: unerwarteter Telegram-Fehler", what)
+            return None
+
+        if delay is None:
+            log.error("%s: nach %d Versuchen aufgegeben — %s", what, attempt, reason)
+            return None
+        log.warning("%s: %s — neuer Versuch in %.0fs", what, reason, wait)
+        await asyncio.sleep(wait)
+    return None
+
+
+def _seconds(retry_after) -> float:
+    # python-telegram-bot stellt retry_after gerade auf timedelta um.
+    if isinstance(retry_after, timedelta):
+        return retry_after.total_seconds()
+    return float(retry_after)
+
+
+async def reply(message, text: str, **kwargs) -> None:
+    """Antwort auf ein Kommando — scheitert sie, bleibt es beim Logeintrag."""
+    await call(lambda: message.reply_text(text, **kwargs), "Antwort im Chat")
+
+
+async def answer(query, text: str | None = None) -> None:
+    # Ein unbeantworteter Knopf dreht im Client ewig; zu alte Anfragen sind verloren.
+    await call(lambda: query.answer(text), "Knopf-Quittung", ignore=(BadRequest,))
+
+
 class TelegramNotifier:
     """Stellt Erinnerungen zu und räumt dabei den Chat auf."""
 
@@ -69,38 +143,37 @@ class TelegramNotifier:
 
         text = self.render(occurrence, reminder)
         markup = self.keyboard(occurrence)
-        try:
-            message = await self.application.bot.send_message(
+        message = await call(
+            lambda: self.application.bot.send_message(
                 chat_id=self.chat_id,
                 text=text,
                 reply_markup=markup,
                 parse_mode=ParseMode.HTML,
-            )
-        except TelegramError:
-            log.exception("Erinnerung '%s' konnte nicht zugestellt werden", occurrence.reminder_id)
-            return None
+            ),
+            f"Erinnerung '{occurrence.reminder_id}' zustellen",
+        )
+        if message is None:
+            return None  # bleibt offen, der nächste Durchlauf nimmt einen neuen Anlauf
         return message.message_id
 
     async def withdraw(self, occurrence: Occurrence) -> None:
         if occurrence.message_id is None:
             return
-        try:
-            await self.application.bot.delete_message(self.chat_id, occurrence.message_id)
-        except BadRequest:
-            pass  # zu alt oder schon weg — nicht schlimm
-        except TelegramError:
-            log.warning("Nachricht %s ließ sich nicht entfernen", occurrence.message_id)
-        finally:
-            self.engine.store.forget_message(occurrence.id)
+        await call(
+            lambda: self.application.bot.delete_message(self.chat_id, occurrence.message_id),
+            f"Nachricht {occurrence.message_id} entfernen",
+            ignore=(BadRequest,),  # zu alt oder schon weg — nicht schlimm
+        )
+        self.engine.store.forget_message(occurrence.id)
 
     async def notify(self, text: str) -> None:
         """Systemmeldung (Konfigurationsfehler, Neustart) ohne Knöpfe."""
-        try:
-            await self.application.bot.send_message(
+        await call(
+            lambda: self.application.bot.send_message(
                 chat_id=self.chat_id, text=text, parse_mode=ParseMode.HTML
-            )
-        except TelegramError:
-            log.exception("Systemmeldung konnte nicht zugestellt werden")
+            ),
+            "Systemmeldung zustellen",
+        )
 
     # -- Darstellung -------------------------------------------------------
 
@@ -188,7 +261,8 @@ class BotHandlers:
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._allowed(update):
             return
-        await update.effective_message.reply_text(
+        await reply(
+            update.effective_message,
             "<b>Erinnerung</b>\n"
             "Ich melde mich, sobald etwas fällig ist, und hake nach, bis du bestätigst.\n\n"
             "/neu &lt;wann&gt; &lt;was&gt; — neue Erinnerung anlegen, z.B. "
@@ -209,7 +283,7 @@ class BotHandlers:
         message = update.effective_message
         request = _COMMAND.sub("", message.text or "", count=1)
         if not request.strip():
-            await message.reply_text(NEW_HELP, parse_mode=ParseMode.HTML)
+            await reply(message, NEW_HELP, parse_mode=ParseMode.HTML)
             return
 
         engine = self.engine
@@ -217,9 +291,7 @@ class BotHandlers:
         try:
             draft = compose.parse(request, now=now, taken=engine.config.reminders)
         except compose.ComposeError as exc:
-            await message.reply_text(
-                f"⚠️ {_escape(str(exc))}\n\n{NEW_HELP}", parse_mode=ParseMode.HTML
-            )
+            await reply(message, f"⚠️ {_escape(str(exc))}\n\n{NEW_HELP}", parse_mode=ParseMode.HTML)
             return
 
         service = self._engine_holder
@@ -227,15 +299,15 @@ class BotHandlers:
         try:
             compose.write(draft, service.config_dir, now=now)
         except OSError as exc:
-            await message.reply_text(f"⚠️ Schreiben nach {INBOX_FILE} ging schief: {exc}")
+            await reply(message, f"⚠️ Schreiben nach {INBOX_FILE} ging schief: {exc}")
             return
 
         notice = service.reload()
         if draft.reminder.id not in self.engine.config.reminders:
-            await message.reply_text(notice, parse_mode=ParseMode.HTML)
+            await reply(message, notice, parse_mode=ParseMode.HTML)
             return
 
-        await message.reply_text(self._confirm(draft), parse_mode=ParseMode.HTML)
+        await reply(message, self._confirm(draft), parse_mode=ParseMode.HTML)
 
     def _confirm(self, draft: compose.Draft) -> str:
         reminder = draft.reminder
@@ -265,7 +337,7 @@ class BotHandlers:
             return
         occurrences = self.store.open_occurrences()
         if not occurrences:
-            await update.effective_message.reply_text("Nichts offen. 🎉")
+            await reply(update.effective_message, "Nichts offen. 🎉")
             return
 
         now = self.engine.clock()
@@ -279,7 +351,7 @@ class BotHandlers:
                 f"• <b>{_escape(occurrence.title)}</b> — {note}\n"
                 f"  <code>/erledigt {_escape(occurrence.reminder_id)}</code>"
             )
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        await reply(update.effective_message, "\n".join(lines), parse_mode=ParseMode.HTML)
 
     def _find_open(self, needle: str) -> list[Occurrence]:
         """Offene Instanzen zu einer Erinnerungs-id, auch bei Teileingabe."""
@@ -294,52 +366,53 @@ class BotHandlers:
         if not self._allowed(update):
             return
         if not context.args:
-            await update.effective_message.reply_text(
-                "So: /erledigt <id> — welche id, zeigt /offen."
-            )
+            await reply(update.effective_message, "So: /erledigt <id> — welche id, zeigt /offen.")
             return
 
         matches = self._find_open(context.args[0])
         if not matches:
-            await update.effective_message.reply_text(
-                f"Zu '{context.args[0]}' ist gerade nichts offen."
+            await reply(
+                update.effective_message, f"Zu '{context.args[0]}' ist gerade nichts offen."
             )
             return
 
         occurrence = await self.engine.ack(matches[0].id)
         if occurrence is None:
-            await update.effective_message.reply_text("Das war schon erledigt.")
+            await reply(update.effective_message, "Das war schon erledigt.")
             return
         await self._clear_message(matches[0], "✅ erledigt")
         rest = len(matches) - 1
         suffix = f" (noch {rest} weitere offen)" if rest else ""
-        await update.effective_message.reply_text(
-            f"✅ <b>{_escape(occurrence.title)}</b> erledigt{suffix}", parse_mode=ParseMode.HTML
+        await reply(
+            update.effective_message,
+            f"✅ <b>{_escape(occurrence.title)}</b> erledigt{suffix}",
+            parse_mode=ParseMode.HTML,
         )
 
     async def snooze(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._allowed(update):
             return
         if len(context.args) < 2:
-            await update.effective_message.reply_text("So: /snooze <id> <dauer>, z.B. 2h")
+            await reply(update.effective_message, "So: /snooze <id> <dauer>, z.B. 2h")
             return
 
         matches = self._find_open(context.args[0])
         if not matches:
-            await update.effective_message.reply_text(
-                f"Zu '{context.args[0]}' ist gerade nichts offen."
+            await reply(
+                update.effective_message, f"Zu '{context.args[0]}' ist gerade nichts offen."
             )
             return
 
         try:
             occurrence, until = self.engine.snooze(matches[0].id, context.args[1])
         except ValueError as exc:
-            await update.effective_message.reply_text(str(exc))
+            await reply(update.effective_message, str(exc))
             return
         if occurrence is None:
-            await update.effective_message.reply_text("Das ist nicht mehr offen.")
+            await reply(update.effective_message, "Das ist nicht mehr offen.")
             return
-        await update.effective_message.reply_text(
+        await reply(
+            update.effective_message,
             f"⏰ <b>{_escape(occurrence.title)}</b> meldet sich wieder um "
             f"{fmt.clock(self.engine.local(until))} ({fmt.day(self.engine.local(until))})",
             parse_mode=ParseMode.HTML,
@@ -350,7 +423,7 @@ class BotHandlers:
             return
         config = self.engine.config
         if not config.reminders:
-            await update.effective_message.reply_text("Es ist keine Erinnerung konfiguriert.")
+            await reply(update.effective_message, "Es ist keine Erinnerung konfiguriert.")
             return
 
         now = self.engine.clock()
@@ -370,7 +443,7 @@ class BotHandlers:
                 else "kein weiterer Termin"
             )
             lines.append(f"• <b>{_escape(title)}</b> — {when}")
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        await reply(update.effective_message, "\n".join(lines), parse_mode=ParseMode.HTML)
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._allowed(update):
@@ -386,20 +459,20 @@ class BotHandlers:
             f"Letzter Durchlauf: "
             + (fmt.clock(engine.local(heartbeat)) if heartbeat else "noch keiner"),
         ]
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        await reply(update.effective_message, "\n".join(lines), parse_mode=ParseMode.HTML)
 
     async def reload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._allowed(update):
             return
         message = self._engine_holder.reload()
-        await update.effective_message.reply_text(message, parse_mode=ParseMode.HTML)
+        await reply(update.effective_message, message, parse_mode=ParseMode.HTML)
 
     # -- Knöpfe ------------------------------------------------------------
 
     async def on_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         if not self._allowed(update):
-            await query.answer("Nicht für dich.")
+            await answer(query, "Nicht für dich.")
             return
 
         parts = (query.data or "").split(":")
@@ -407,7 +480,7 @@ class BotHandlers:
         try:
             occurrence_id = int(raw_id)
         except ValueError:
-            await query.answer("Kann ich nicht zuordnen.")
+            await answer(query, "Kann ich nicht zuordnen.")
             return
 
         if action == DONE:
@@ -421,44 +494,47 @@ class BotHandlers:
             try:
                 occurrence, until = self.engine.snooze(occurrence_id, spec)
             except ValueError:
-                await query.answer("Diese Schlummerdauer verstehe ich nicht.")
+                await answer(query, "Diese Schlummerdauer verstehe ich nicht.")
                 return
             if occurrence is None:
-                await query.answer("Nicht mehr offen.")
+                await answer(query, "Nicht mehr offen.")
                 return
             local_until = self.engine.local(until)
-            await query.answer(f"Bis {fmt.clock(local_until)}.")
+            await answer(query, f"Bis {fmt.clock(local_until)}.")
             await self._append_note(query, f"⏰ schlummert bis {fmt.clock(local_until)}")
         else:
-            await query.answer()
+            await answer(query)
 
     async def _answer(self, query, occurrence: Occurrence | None, note: str, fallback: str) -> None:
         if occurrence is None:
-            await query.answer(fallback)
+            await answer(query, fallback)
             return
-        await query.answer(note)
+        await answer(query, note)
         await self._append_note(query, f"{note} um {fmt.clock(self.engine.local(self.engine.clock()))}",
                                keep_buttons=False)
 
     async def _append_note(self, query, note: str, keep_buttons: bool = True) -> None:
         """Die Nachricht als quittiert markieren, statt sie zu löschen — als Beleg im Chat."""
         text = f"{query.message.text_html}\n<i>{_escape(note)}</i>"
-        try:
-            await query.edit_message_text(
+        await call(
+            lambda: query.edit_message_text(
                 text=text,
                 parse_mode=ParseMode.HTML,
                 reply_markup=query.message.reply_markup if keep_buttons else None,
-            )
-        except BadRequest:
-            pass
+            ),
+            "Nachricht quittieren",
+            ignore=(BadRequest,),  # unverändert oder zu alt — der Knopf hat trotzdem gewirkt
+        )
 
     async def _clear_message(self, occurrence: Occurrence, note: str) -> None:
         """Nach /erledigt die zugehörige Nachricht entschärfen."""
         if occurrence.message_id is None:
             return
-        try:
-            await self._engine_holder.notifier.application.bot.edit_message_reply_markup(
+        bot = self._engine_holder.notifier.application.bot
+        await call(
+            lambda: bot.edit_message_reply_markup(
                 chat_id=self.chat_id, message_id=occurrence.message_id, reply_markup=None
-            )
-        except TelegramError:
-            pass
+            ),
+            f"Knöpfe an Nachricht {occurrence.message_id} entfernen",
+            ignore=(BadRequest,),
+        )

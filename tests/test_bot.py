@@ -6,6 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from telegram.error import BadRequest, RetryAfter, TimedOut
+
+from erinnerung import bot as bot_module
 from erinnerung.bot import BotHandlers, TelegramNotifier
 from erinnerung.config import INBOX_FILE, Reminder, load_config
 from erinnerung.engine import Engine
@@ -252,3 +255,86 @@ async def test_handler_lassen_sich_registrieren():
         for command in getattr(handler, "commands", None) or []
     }
     assert {"neu", "offen", "erledigt", "snooze", "plan", "status", "reload"} <= commands
+
+
+# -- Fehlerhandling ---------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def sofort_wiederholen(monkeypatch):
+    """Wartezeiten zwischen den Versuchen interessieren im Test nicht."""
+    monkeypatch.setattr(bot_module, "RETRY_DELAYS", (0.0, 0.0))
+    monkeypatch.setattr(bot_module.asyncio, "sleep", _no_sleep)
+
+
+async def _no_sleep(_seconds) -> None:
+    return None
+
+
+class FlakyBot(FakeBot):
+    """Wirft die vorgegebenen Fehler, bevor er sich zum Senden bequemt."""
+
+    def __init__(self, *errors: Exception) -> None:
+        super().__init__()
+        self.errors = list(errors)
+        self.attempts = 0
+
+    async def send_message(self, *args, **kwargs):
+        self.attempts += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return await super().send_message(*args, **kwargs)
+
+
+async def test_zustellung_uebersteht_einen_netzwerkwackler(wired):
+    flaky = FlakyBot(TimedOut(), RetryAfter(1))
+    wired.notifier.application.bot = flaky
+
+    await wired.engine.tick()
+    wired.clock.advance(minutes=2)
+    await wired.engine.tick()
+
+    assert flaky.attempts == 3, "zwei Fehlversuche, dann kommt sie durch"
+    assert "Biotonne rausstellen" in flaky.sent[-1].text
+    offen = wired.engine.store.open_occurrences()
+    assert offen[0].message_id == flaky.sent[-1].message_id
+
+
+async def test_dauerhafter_fehler_laesst_die_erinnerung_offen(wired, caplog):
+    flaky = FlakyBot(TimedOut(), TimedOut(), TimedOut())
+    wired.notifier.application.bot = flaky
+
+    await wired.engine.tick()
+    wired.clock.advance(minutes=2)
+    await wired.engine.tick()
+
+    assert flaky.attempts == 3, "nach drei Versuchen ist Schluss"
+    assert flaky.sent == []
+    offen = wired.engine.store.open_occurrences()
+    assert offen and offen[0].message_id is None, "ohne Nachricht wird beim nächsten Mal genervt"
+
+
+async def test_abgelehnte_nachricht_wird_nicht_wiederholt(wired):
+    flaky = FlakyBot(*[BadRequest("chat not found")] * 5)
+    wired.notifier.application.bot = flaky
+
+    await wired.engine.tick()
+    wired.clock.advance(minutes=2)
+    await wired.engine.tick()
+
+    assert flaky.attempts == 1, "was Telegram ablehnt, lehnt es auch beim zweiten Mal ab"
+
+
+async def test_kommandoantwort_scheitert_ohne_absturz(neu):
+    class StureMessage(FakeMessage):
+        async def reply_text(self, text, parse_mode=None):
+            raise TimedOut()
+
+    message = StureMessage("/neu täglich 19:00 Pflanzen gießen")
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=CHAT_ID), effective_message=message
+    )
+
+    await neu.handlers.new(update, None)
+
+    assert "pflanzen-giessen" in neu.service.config.reminders, "angelegt ist sie trotzdem"
