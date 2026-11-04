@@ -1,7 +1,7 @@
 services:
   erinnerung:
-    build: .
-    image: erinnerung:latest
+    # Wird von der CI gebaut. Lokal selbst bauen: docker build -t ghcr.io/surt91/erinnerung .
+    image: ghcr.io/surt91/erinnerung:latest
     container_name: erinnerung
     restart: unless-stopped
     env_file: .env

@@ -26,11 +26,24 @@ Erinnerung kommt per Telegram — und sie hakt so lange nach, bis du bestätigst
    cp .env.example .env   # TELEGRAM_BOT_TOKEN und TELEGRAM_CHAT_ID ausfüllen
    ```
 
-4. **Starten:**
+4. **Starten:** Auf dem Server reichen `docker-compose.yml`, `.env` und ein Ordner
+   `config/` mit deinen YAML-Dateien — kein Checkout nötig. Das Image baut die CI bei
+   jedem Push auf `main` und legt es unter `ghcr.io/surt91/erinnerung` ab
+   (amd64 und arm64).
 
    ```sh
    docker compose up -d
    ```
+
+   **Update:**
+
+   ```sh
+   docker compose pull && docker compose up -d
+   ```
+
+   Neben `latest` gibt es für jeden Commit `sha-<hash>` und für Tags `v1.2.3` die
+   Version — zum Festnageln oder Zurückrollen einfach den Tag in `docker-compose.yml`
+   eintragen. Lokal selbst bauen geht mit `docker build -t ghcr.io/surt91/erinnerung .`
 
 Nur die konfigurierte Chat-ID darf mit dem Bot reden — alles andere wird ignoriert.
 Der Bot hängt per Long-Polling an Telegram: kein offener Port, kein Reverse Proxy.
