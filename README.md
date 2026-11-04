@@ -32,8 +32,14 @@ Erinnerung kommt per Telegram — und sie hakt so lange nach, bis du bestätigst
    (amd64 und arm64).
 
    ```sh
+   mkdir -p data && sudo chown 1000:1000 data config   # der Container läuft als UID 1000
    docker compose up -d
    ```
+
+   In `data/` liegt nur der Zustand (`state.db`: was offen ist, Schlummerzeiten,
+   letzter Durchlauf). Geht er verloren, läuft der Bot einfach ab jetzt weiter —
+   offene Erinnerungen sind dann allerdings vergessen. Sichern solltest du vor allem
+   `config/`.
 
    **Update:**
 

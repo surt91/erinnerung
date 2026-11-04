@@ -11,8 +11,10 @@ services:
     volumes:
       # Deine Erinnerungen — der Bot liest sie und archiviert erledigte Einmal-Termine.
       - ./config:/config
-      # Zustand (welche Erinnerung ist offen, wann zuletzt genervt).
-      - state:/data
+      # Zustand (welche Erinnerung ist offen, wann zuletzt genervt). Verzichtbar,
+      # aber ohne ihn sind offene Erinnerungen und Schlummerzeiten vergessen.
+      # Der Container läuft als UID 1000 — der Ordner muss ihr gehören.
+      - ./data:/data
     healthcheck:
       # Der Tick-Loop schreibt regelmäßig einen Heartbeat in die DB.
       test: ["CMD", "python", "-m", "erinnerung.healthcheck"]
@@ -20,6 +22,3 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 3
-
-volumes:
-  state:
