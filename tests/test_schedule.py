@@ -51,9 +51,7 @@ def test_unsinn_wird_abgelehnt(kwargs, hint):
 
 def test_faelligkeiten_im_zeitraum():
     schedule = Schedule(every="friday", at="18:00")
-    moments = occurrences_between(
-        schedule, BERLIN, local(2026, 8, 1), local(2026, 8, 31)
-    )
+    moments = occurrences_between(schedule, BERLIN, local(2026, 8, 1), local(2026, 8, 31))
     assert [m.astimezone(BERLIN).day for m in moments] == [7, 14, 21, 28]
     assert {m.astimezone(BERLIN).hour for m in moments} == {18}
 

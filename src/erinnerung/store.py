@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-UTC = timezone.utc
+from typing import overload
 
 OPEN = "open"
 ACKED = "acked"
@@ -48,12 +47,20 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 
+@overload
+def _iso(moment: datetime) -> str: ...
+@overload
+def _iso(moment: None) -> None: ...
 def _iso(moment: datetime | None) -> str | None:
     if moment is None:
         return None
     return moment.astimezone(UTC).isoformat()
 
 
+@overload
+def _parse(value: str) -> datetime: ...
+@overload
+def _parse(value: str | None) -> datetime | None: ...
 def _parse(value: str | None) -> datetime | None:
     if value is None:
         return None
@@ -78,7 +85,7 @@ class Occurrence:
     message_id: int | None = None
 
     @classmethod
-    def from_row(cls, row: sqlite3.Row) -> "Occurrence":
+    def from_row(cls, row: sqlite3.Row) -> Occurrence:
         return cls(
             id=row["id"],
             reminder_id=row["reminder_id"],
@@ -155,7 +162,7 @@ class Store:
             (reminder_id, _iso(event_at), _iso(due_at), status, title, _iso(now), _iso(resolved)),
         )
         self._db.commit()
-        if cursor.rowcount == 0:
+        if cursor.rowcount == 0 or cursor.lastrowid is None:
             return None
         return self.get(cursor.lastrowid)
 
@@ -211,9 +218,7 @@ class Store:
         self._db.commit()
 
     def forget_message(self, occurrence_id: int) -> None:
-        self._db.execute(
-            "UPDATE occurrences SET message_id = NULL WHERE id = ?", (occurrence_id,)
-        )
+        self._db.execute("UPDATE occurrences SET message_id = NULL WHERE id = ?", (occurrence_id,))
         self._db.commit()
 
     def counts_by_status(self) -> dict[str, int]:

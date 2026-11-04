@@ -12,7 +12,6 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
-from typing import TypeVar
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -59,13 +58,11 @@ def _escape(text: str) -> str:
     return html.escape(text, quote=False)
 
 
-T = TypeVar("T")
-
 RETRY_DELAYS = (2.0, 5.0)  # zwei Nachfassversuche, dann war es kein Wackler mehr
 MAX_WAIT = 60.0  # länger auf ein Rate-Limit zu warten bringt nichts
 
 
-async def call(
+async def call[T](
     action: Callable[[], Awaitable[T]],
     what: str,
     *,
@@ -189,7 +186,9 @@ class TelegramNotifier:
         detail = []
         if occurrence.has_lead:
             event_local = engine.local(occurrence.event_at)
-            detail.append(f"Termin: {fmt.stamp(event_local)} ({fmt.relative(occurrence.event_at - now)})")
+            detail.append(
+                f"Termin: {fmt.stamp(event_local)} ({fmt.relative(occurrence.event_at - now)})"
+            )
         else:
             detail.append(f"fällig seit {fmt.clock(due_local)}")
 
@@ -281,6 +280,8 @@ class BotHandlers:
         if not self._allowed(update):
             return
         message = update.effective_message
+        if message is None:
+            return
         request = _COMMAND.sub("", message.text or "", count=1)
         if not request.strip():
             await reply(message, NEW_HELP, parse_mode=ParseMode.HTML)
@@ -392,25 +393,25 @@ class BotHandlers:
     async def snooze(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._allowed(update):
             return
-        if len(context.args) < 2:
+        args = context.args or []
+        if len(args) < 2:
             await reply(update.effective_message, "So: /snooze <id> <dauer>, z.B. 2h")
             return
 
-        matches = self._find_open(context.args[0])
+        matches = self._find_open(args[0])
         if not matches:
-            await reply(
-                update.effective_message, f"Zu '{context.args[0]}' ist gerade nichts offen."
-            )
+            await reply(update.effective_message, f"Zu '{args[0]}' ist gerade nichts offen.")
             return
 
         try:
-            occurrence, until = self.engine.snooze(matches[0].id, context.args[1])
+            snoozed = self.engine.snooze(matches[0].id, args[1])
         except ValueError as exc:
             await reply(update.effective_message, str(exc))
             return
-        if occurrence is None:
+        if snoozed is None:
             await reply(update.effective_message, "Das ist nicht mehr offen.")
             return
+        occurrence, until = snoozed
         await reply(
             update.effective_message,
             f"⏰ <b>{_escape(occurrence.title)}</b> meldet sich wieder um "
@@ -456,7 +457,7 @@ class BotHandlers:
             f"Erinnerungen konfiguriert: {len(engine.config.reminders)}",
             f"Offen: {counts.get(OPEN, 0)} · erledigt: {counts.get(ACKED, 0)}",
             f"Zeitzone: {engine.config.tzinfo.key}",
-            f"Letzter Durchlauf: "
+            "Letzter Durchlauf: "
             + (fmt.clock(engine.local(heartbeat)) if heartbeat else "noch keiner"),
         ]
         await reply(update.effective_message, "\n".join(lines), parse_mode=ParseMode.HTML)
@@ -471,6 +472,8 @@ class BotHandlers:
 
     async def on_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
+        if query is None:
+            return
         if not self._allowed(update):
             await answer(query, "Nicht für dich.")
             return
@@ -492,14 +495,14 @@ class BotHandlers:
         elif action == SNOOZE:
             spec = extra[0] if extra else "1h"
             try:
-                occurrence, until = self.engine.snooze(occurrence_id, spec)
+                snoozed = self.engine.snooze(occurrence_id, spec)
             except ValueError:
                 await answer(query, "Diese Schlummerdauer verstehe ich nicht.")
                 return
-            if occurrence is None:
+            if snoozed is None:
                 await answer(query, "Nicht mehr offen.")
                 return
-            local_until = self.engine.local(until)
+            local_until = self.engine.local(snoozed[1])
             await answer(query, f"Bis {fmt.clock(local_until)}.")
             await self._append_note(query, f"⏰ schlummert bis {fmt.clock(local_until)}")
         else:
@@ -510,8 +513,11 @@ class BotHandlers:
             await answer(query, fallback)
             return
         await answer(query, note)
-        await self._append_note(query, f"{note} um {fmt.clock(self.engine.local(self.engine.clock()))}",
-                               keep_buttons=False)
+        await self._append_note(
+            query,
+            f"{note} um {fmt.clock(self.engine.local(self.engine.clock()))}",
+            keep_buttons=False,
+        )
 
     async def _append_note(self, query, note: str, keep_buttons: bool = True) -> None:
         """Die Nachricht als quittiert markieren, statt sie zu löschen — als Beleg im Chat."""

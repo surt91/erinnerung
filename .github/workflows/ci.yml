@@ -19,6 +19,10 @@ jobs:
         with:
           python-version: "3.13"
       - run: uv sync --frozen
+      - run: uv run ruff check --output-format github .
+      - run: uv run ruff format --check .
+      # Nur src: die Tests arbeiten bewusst mit Duck-Typing-Fakes.
+      - run: uv run ty check --output-format github src
       - run: uv run pytest -q
 
   publish:

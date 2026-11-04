@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from .app import DEFAULT_DB
 from .engine import HEARTBEAT
@@ -31,7 +31,7 @@ def main() -> int:
         print("noch kein Durchlauf", file=sys.stderr)
         return 1
 
-    age = datetime.now(timezone.utc) - heartbeat
+    age = datetime.now(UTC) - heartbeat
     if age > MAX_AGE:
         print(f"letzter Durchlauf vor {age}", file=sys.stderr)
         return 1

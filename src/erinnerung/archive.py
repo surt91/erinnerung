@@ -36,9 +36,7 @@ class YamlArchiver:
         if not entries:
             return False
 
-        index = next(
-            (i for i, entry in enumerate(entries) if entry.get("id") == reminder_id), None
-        )
+        index = next((i for i, entry in enumerate(entries) if entry.get("id") == reminder_id), None)
         if index is None:
             return False
 

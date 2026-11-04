@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from telegram.error import BadRequest, RetryAfter, TimedOut
 
 from erinnerung import bot as bot_module
@@ -232,9 +231,7 @@ async def test_neu_ohne_argumente_zeigt_die_hilfe(neu):
 
 async def test_neu_aus_fremdem_chat_wird_ignoriert(neu):
     message = FakeMessage("/neu täglich 19:00 Pflanzen gießen")
-    update = SimpleNamespace(
-        effective_chat=SimpleNamespace(id=99), effective_message=message
-    )
+    update = SimpleNamespace(effective_chat=SimpleNamespace(id=99), effective_message=message)
     await neu.handlers.new(update, None)
 
     assert message.replies == []
@@ -250,9 +247,7 @@ async def test_handler_lassen_sich_registrieren():
 
     handlers = application.handlers[0]
     commands = {
-        command
-        for handler in handlers
-        for command in getattr(handler, "commands", None) or []
+        command for handler in handlers for command in getattr(handler, "commands", None) or []
     }
     assert {"neu", "offen", "erledigt", "snooze", "plan", "status", "reload"} <= commands
 
@@ -331,9 +326,7 @@ async def test_kommandoantwort_scheitert_ohne_absturz(neu):
             raise TimedOut()
 
     message = StureMessage("/neu täglich 19:00 Pflanzen gießen")
-    update = SimpleNamespace(
-        effective_chat=SimpleNamespace(id=CHAT_ID), effective_message=message
-    )
+    update = SimpleNamespace(effective_chat=SimpleNamespace(id=CHAT_ID), effective_message=message)
 
     await neu.handlers.new(update, None)
 

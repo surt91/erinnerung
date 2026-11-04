@@ -43,29 +43,61 @@ INBOX_HEADER = (
 _FILLER = {"jeden", "jede", "jedes", "jeder", "am", "um", "und", "at", "every", "and"}
 
 _RELATIVE_DAYS = {
-    "heute": 0, "today": 0,
-    "morgen": 1, "tomorrow": 1,
-    "übermorgen": 2, "uebermorgen": 2,
+    "heute": 0,
+    "today": 0,
+    "morgen": 1,
+    "tomorrow": 1,
+    "übermorgen": 2,
+    "uebermorgen": 2,
 }
 
 _MONTHS = {
-    "januar": 1, "january": 1, "jan": 1,
-    "februar": 2, "february": 2, "feb": 2,
-    "märz": 3, "maerz": 3, "march": 3, "mär": 3, "mar": 3,
-    "april": 4, "apr": 4,
-    "mai": 5, "may": 5,
-    "juni": 6, "june": 6, "jun": 6,
-    "juli": 7, "july": 7, "jul": 7,
-    "august": 8, "aug": 8,
-    "september": 9, "sep": 9, "sept": 9,
-    "oktober": 10, "october": 10, "okt": 10, "oct": 10,
-    "november": 11, "nov": 11,
-    "dezember": 12, "december": 12, "dez": 12, "dec": 12,
+    "januar": 1,
+    "january": 1,
+    "jan": 1,
+    "februar": 2,
+    "february": 2,
+    "feb": 2,
+    "märz": 3,
+    "maerz": 3,
+    "march": 3,
+    "mär": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
+    "mai": 5,
+    "may": 5,
+    "juni": 6,
+    "june": 6,
+    "jun": 6,
+    "juli": 7,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "oktober": 10,
+    "october": 10,
+    "okt": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "dezember": 12,
+    "december": 12,
+    "dez": 12,
+    "dec": 12,
 }
 
 _GERMAN_WEEKDAYS = {
-    "MON": "Montag", "TUE": "Dienstag", "WED": "Mittwoch", "THU": "Donnerstag",
-    "FRI": "Freitag", "SAT": "Samstag", "SUN": "Sonntag",
+    "MON": "Montag",
+    "TUE": "Dienstag",
+    "WED": "Mittwoch",
+    "THU": "Donnerstag",
+    "FRI": "Freitag",
+    "SAT": "Samstag",
+    "SUN": "Sonntag",
 }
 
 _CLOCK = re.compile(r"^(\d{1,2}):(\d{2})$")
@@ -376,7 +408,9 @@ def parse(text: str, *, now: datetime, taken: Container[str] = ()) -> Draft:
 
     fields, description = _to_schedule(spec, now)
     if not title:
-        raise ComposeError("Es fehlt der Titel — nach der Zeitangabe kommt, woran ich erinnern soll.")
+        raise ComposeError(
+            "Es fehlt der Titel — nach der Zeitangabe kommt, woran ich erinnern soll."
+        )
 
     entry: dict = {"id": make_id(title, taken), "title": title}
     if note:

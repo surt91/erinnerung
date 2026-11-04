@@ -25,7 +25,9 @@ def parse_duration(value: object) -> timedelta:
     if isinstance(value, timedelta):
         return value
     if not isinstance(value, str):
-        raise ValueError(f"Dauer muss Text sein, z.B. '30m' (bekommen: {value!r})")
+        # ValueError statt TypeError: nur den macht Pydantic (BeforeValidator) zum
+        # ValidationError mit Feldangabe.
+        raise ValueError(f"Dauer muss Text sein, z.B. '30m' (bekommen: {value!r})")  # noqa: TRY004
 
     text = value.strip().lower()
     if not text:

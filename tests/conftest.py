@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -9,7 +10,6 @@ from erinnerung.config import LoadedConfig, Reminder, Settings
 from erinnerung.engine import Engine
 from erinnerung.store import Occurrence, Store
 
-UTC = timezone.utc
 BERLIN = ZoneInfo("Europe/Berlin")
 
 
@@ -68,7 +68,7 @@ def make_config(*reminders: Reminder, **settings_kwargs) -> LoadedConfig:
 
 
 @pytest.fixture
-def store(tmp_path) -> Store:
+def store(tmp_path) -> Iterator[Store]:
     store = Store(tmp_path / "state.db")
     yield store
     store.close()

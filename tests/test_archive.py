@@ -38,7 +38,7 @@ def prepare(tmp_path):
 
 
 async def test_archivieren_verschiebt_den_eintrag(tmp_path):
-    service, archiver = prepare(tmp_path)
+    _service, archiver = prepare(tmp_path)
 
     assert await archiver.archive("reifen") is True
 
@@ -54,7 +54,7 @@ async def test_archivieren_verschiebt_den_eintrag(tmp_path):
 
 
 async def test_kommentare_und_formatierung_bleiben(tmp_path):
-    service, archiver = prepare(tmp_path)
+    _service, archiver = prepare(tmp_path)
     await archiver.archive("reifen")
 
     rest = (tmp_path / "termine.yaml").read_text(encoding="utf-8")
@@ -64,7 +64,7 @@ async def test_kommentare_und_formatierung_bleiben(tmp_path):
 
 
 async def test_archivierte_datei_wird_nicht_neu_geladen(tmp_path):
-    service, archiver = prepare(tmp_path)
+    _service, archiver = prepare(tmp_path)
     await archiver.archive("reifen")
 
     assert set(load_config(tmp_path).reminders) == {"muell"}
@@ -94,6 +94,6 @@ async def test_eigener_schreibvorgang_wird_angekuendigt(tmp_path):
 
 
 async def test_unbekannte_id_tut_nichts(tmp_path):
-    service, archiver = prepare(tmp_path)
+    _service, archiver = prepare(tmp_path)
     assert await archiver.archive("gibtsnicht") is False
     assert not (tmp_path / "archive").exists()

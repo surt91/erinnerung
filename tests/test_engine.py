@@ -88,7 +88,9 @@ async def test_schlummern_verschiebt(build_engine, notifier):
     clock.advance(minutes=2)
     result = await engine.tick()
 
-    occurrence, until = engine.snooze(result.created[0].id, "3h")
+    snoozed = engine.snooze(result.created[0].id, "3h")
+    assert snoozed is not None
+    _, until = snoozed
     assert until - clock.moment == timedelta(hours=3)
 
     clock.advance(hours=2)
@@ -235,7 +237,9 @@ async def test_sommerzeit_haelt_die_wanduhrzeit(build_engine, notifier):
     clock.set(local(2026, 10, 26, 12, 0))  # Umstellung war in der Nacht zum 25.
     result = await engine.tick()
 
-    stunden = {engine.local(occurrence.due_at).hour for occurrence in result.created + result.expired}
+    stunden = {
+        engine.local(occurrence.due_at).hour for occurrence in result.created + result.expired
+    }
     assert stunden == {9}
 
 

@@ -8,25 +8,44 @@ der Zeitpunkte berechnet — die Kurzform ist reine Schreiberleichterung.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from croniter import CroniterBadCronError, croniter
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 
-UTC = timezone.utc
-
 # Cron kennt nur englische Kürzel; hier darf man großzügiger schreiben.
 # Öffentlich, weil /neu (siehe :mod:`erinnerung.compose`) dieselben Wörter
 # verstehen soll wie die YAML.
 WEEKDAYS = {
-    "mon": "MON", "monday": "MON", "mo": "MON", "montag": "MON",
-    "tue": "TUE", "tuesday": "TUE", "di": "TUE", "dienstag": "TUE",
-    "wed": "WED", "wednesday": "WED", "mi": "WED", "mittwoch": "WED",
-    "thu": "THU", "thursday": "THU", "do": "THU", "donnerstag": "THU",
-    "fri": "FRI", "friday": "FRI", "fr": "FRI", "freitag": "FRI",
-    "sat": "SAT", "saturday": "SAT", "sa": "SAT", "samstag": "SAT",
-    "sun": "SUN", "sunday": "SUN", "so": "SUN", "sonntag": "SUN",
+    "mon": "MON",
+    "monday": "MON",
+    "mo": "MON",
+    "montag": "MON",
+    "tue": "TUE",
+    "tuesday": "TUE",
+    "di": "TUE",
+    "dienstag": "TUE",
+    "wed": "WED",
+    "wednesday": "WED",
+    "mi": "WED",
+    "mittwoch": "WED",
+    "thu": "THU",
+    "thursday": "THU",
+    "do": "THU",
+    "donnerstag": "THU",
+    "fri": "FRI",
+    "friday": "FRI",
+    "fr": "FRI",
+    "freitag": "FRI",
+    "sat": "SAT",
+    "saturday": "SAT",
+    "sa": "SAT",
+    "samstag": "SAT",
+    "sun": "SUN",
+    "sunday": "SUN",
+    "so": "SUN",
+    "sonntag": "SUN",
 }
 DAILY = {"day", "daily", "tag", "täglich", "taeglich"}
 MONTHLY = {"month", "monthly", "monat", "monatlich"}
@@ -59,7 +78,9 @@ def _parse_month_day(value: str) -> tuple[int, int]:
     text = str(value).strip()
     match = _MONTH_DAY.match(text)
     if not match:
-        raise ScheduleError(f"Datum '{value}' nicht verstanden, erwartet wird 'MM-DD', z.B. '10-12'")
+        raise ScheduleError(
+            f"Datum '{value}' nicht verstanden, erwartet wird 'MM-DD', z.B. '10-12'"
+        )
     first, second = int(match.group(1)), int(match.group(2))
     # '10-12' ist Monat-Tag, '12.10.' ist die deutsche Schreibweise Tag.Monat.
     month, day = (second, first) if "." in text else (first, second)
@@ -96,8 +117,10 @@ class Schedule(BaseModel):
         return self.once is not None
 
     @model_validator(mode="after")
-    def _compile(self) -> "Schedule":
-        forms = [f for f, v in (("every", self.every), ("cron", self.cron), ("once", self.once)) if v]
+    def _compile(self) -> Schedule:
+        forms = [
+            f for f, v in (("every", self.every), ("cron", self.cron), ("once", self.once)) if v
+        ]
         if len(forms) != 1:
             raise ScheduleError(
                 "Ein Zeitplan braucht genau eines von 'every', 'cron' oder 'once'"
@@ -117,7 +140,9 @@ class Schedule(BaseModel):
         try:
             croniter(self._compiled)
         except (CroniterBadCronError, ValueError) as exc:
-            source = f"cron '{self.cron}'" if self.cron else f"'{self._compiled}' (aus der Kurzform)"
+            source = (
+                f"cron '{self.cron}'" if self.cron else f"'{self._compiled}' (aus der Kurzform)"
+            )
             raise ScheduleError(f"Ungültiger Zeitplan {source}: {exc}") from exc
         return self
 
@@ -142,7 +167,9 @@ class Schedule(BaseModel):
             if key in YEARLY:
                 self._reject("day", context="every: year")
                 if not self.date:
-                    raise ScheduleError("'every: year' braucht zusätzlich 'date', z.B. date: \"10-12\"")
+                    raise ScheduleError(
+                        "'every: year' braucht zusätzlich 'date', z.B. date: \"10-12\""
+                    )
                 month, day = _parse_month_day(self.date)
                 return f"{minute} {hour} {day} {month} *"
 
@@ -201,7 +228,7 @@ def occurrences_between(
     local_stop = (until.astimezone(tz) + timedelta(hours=2)).replace(tzinfo=None)
 
     result: list[datetime] = []
-    cron = croniter(schedule.cron_expr, local_after)
+    cron = croniter(_expr(schedule), local_after)
     for _ in range(limit):
         candidate = cron.get_next(datetime)
         if candidate > local_stop:
@@ -212,6 +239,14 @@ def occurrences_between(
     return result
 
 
+def _expr(schedule: Schedule) -> str:
+    # Alles außer 'once' wird beim Validieren zu einem Cron-Ausdruck kompiliert.
+    expr = schedule.cron_expr
+    if expr is None:
+        raise ValueError("Einmal-Termine haben keinen Cron-Ausdruck")
+    return expr
+
+
 def next_occurrence(schedule: Schedule, tz: ZoneInfo, after: datetime) -> datetime | None:
     """Nächste Fälligkeit nach ``after`` (UTC), oder ``None`` bei erledigten Einmal-Terminen."""
     if schedule.once is not None:
@@ -219,7 +254,7 @@ def next_occurrence(schedule: Schedule, tz: ZoneInfo, after: datetime) -> dateti
         return moment if moment > after else None
 
     local_after = after.astimezone(tz).replace(tzinfo=None)
-    cron = croniter(schedule.cron_expr, local_after)
+    cron = croniter(_expr(schedule), local_after)
     for _ in range(10):
         moment = _to_utc(cron.get_next(datetime), tz)
         if moment > after:

@@ -201,7 +201,7 @@ def test_handgeschriebenes_bleibt_unangetastet(tmp_path):
     (tmp_path / INBOX_FILE).write_text(
         "# von Hand\nreminders:\n"
         '  - id: alt\n    title: "Alter Eintrag"   # bleibt\n'
-        "    schedule:\n      every: day\n      at: \"07:00\"\n",
+        '    schedule:\n      every: day\n      at: "07:00"\n',
         encoding="utf-8",
     )
 

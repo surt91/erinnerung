@@ -8,9 +8,8 @@ import pytest
 
 from erinnerung.config import Settings, load_config
 from erinnerung.engine import Engine
-from erinnerung.store import Store
 
-from .conftest import BERLIN, FakeClock, local
+from .conftest import FakeClock, local
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 

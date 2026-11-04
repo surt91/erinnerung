@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -20,7 +20,6 @@ from .store import ACKED, EXPIRED, OPEN, REMOVED, SKIPPED, Occurrence, Store
 
 log = logging.getLogger(__name__)
 
-UTC = timezone.utc
 
 LAST_TICK = "last_tick_at"
 HEARTBEAT = "heartbeat_at"
@@ -117,9 +116,7 @@ class Engine:
             lead = reminder.lead_delta
             # Gesucht sind Termine, deren *Erinnerungszeitpunkt* ins Fenster fällt.
             # Bei Vorlauf liegt der Termin selbst entsprechend später.
-            events = occurrences_between(
-                reminder.schedule, tz, last_tick + lead, now + lead
-            )
+            events = occurrences_between(reminder.schedule, tz, last_tick + lead, now + lead)
             for event_at in events:
                 due_at = event_at - lead
                 overdue = due_at < cutoff
@@ -163,8 +160,10 @@ class Engine:
                 self.store.resolve(occurrence.id, REMOVED, now)
                 await self.notifier.withdraw(occurrence)
                 result.removed.append(occurrence)
-                log.info("Erinnerung '%s' nicht mehr konfiguriert, offene Instanz geschlossen",
-                         occurrence.reminder_id)
+                log.info(
+                    "Erinnerung '%s' nicht mehr konfiguriert, offene Instanz geschlossen",
+                    occurrence.reminder_id,
+                )
                 continue
 
             if occurrence.due_at > now:
@@ -208,13 +207,15 @@ class Engine:
 
         return self.store.get(occurrence_id)
 
-    def snooze(self, occurrence_id: int, spec: str) -> tuple[Occurrence | None, datetime | None]:
+    def snooze(self, occurrence_id: int, spec: str) -> tuple[Occurrence, datetime] | None:
+        """Bis wann geschlummert wird — oder ``None``, wenn nichts (mehr) offen ist."""
         occurrence = self.store.get(occurrence_id)
         if occurrence is None or occurrence.status != OPEN:
-            return None, None
+            return None
         until = resolve_snooze(spec, self.clock(), self.config)
         self.store.snooze(occurrence_id, until)
-        return self.store.get(occurrence_id), until
+        updated = self.store.get(occurrence_id)
+        return (updated, until) if updated else None
 
     # -- Auskunft -----------------------------------------------------------
 

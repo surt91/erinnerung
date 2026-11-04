@@ -46,9 +46,7 @@ class Service:
             .build()
         )
         self.notifier = TelegramNotifier(self.application, chat_id, self)
-        self.engine = Engine(
-            self.store, self.config, self.notifier, archiver=YamlArchiver(self)
-        )
+        self.engine = Engine(self.store, self.config, self.notifier, archiver=YamlArchiver(self))
         BotHandlers(self, chat_id).register(self.application)
         self.application.add_error_handler(self._on_error)
 
@@ -126,8 +124,11 @@ class Service:
         for task in self._tasks:
             try:
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: B014 - Herunterfahren
+            except asyncio.CancelledError:
                 pass
+            except Exception:
+                # Beim Herunterfahren nicht abbrechen, aber auch nichts verschlucken.
+                log.exception("Task %s endete mit Fehler", task.get_name())
         self.store.close()
 
     # -- Takt --------------------------------------------------------------
@@ -148,8 +149,7 @@ class Service:
         if not result.expired:
             return
         titles = "\n".join(
-            f"• {html.escape(occurrence.title, quote=False)}"
-            for occurrence in result.expired[:10]
+            f"• {html.escape(occurrence.title, quote=False)}" for occurrence in result.expired[:10]
         )
         more = "" if len(result.expired) <= 10 else f"\n… und {len(result.expired) - 10} weitere"
         await self.notifier.notify(
@@ -187,8 +187,7 @@ def _require_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
         raise MissingSetting(
-            f"{name} ist nicht gesetzt. Trage es in die .env ein "
-            "(Vorlage: .env.example)."
+            f"{name} ist nicht gesetzt. Trage es in die .env ein (Vorlage: .env.example)."
         )
     return value
 
@@ -200,7 +199,9 @@ def build_service() -> Service:
     try:
         chat_id = int(raw_chat_id)
     except ValueError as exc:
-        raise MissingSetting(f"TELEGRAM_CHAT_ID muss eine Zahl sein, nicht '{raw_chat_id}'") from exc
+        raise MissingSetting(
+            f"TELEGRAM_CHAT_ID muss eine Zahl sein, nicht '{raw_chat_id}'"
+        ) from exc
 
     return Service(
         config_dir=Path(os.environ.get("ERINNERUNG_CONFIG_DIR", DEFAULT_CONFIG_DIR)),
